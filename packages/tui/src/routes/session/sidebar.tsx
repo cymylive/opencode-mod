@@ -188,15 +188,7 @@ export function Sidebar(props: { sessionID: string; overlay?: boolean }) {
     if (!name) return
     const prompt = await DialogPrompt.show(dialog, "Prompt", { value: "" })
     if (!prompt) return
-    const expr = await DialogPrompt.show(dialog, "Cron expression", {
-      value: "*/5",
-      description: () => (
-        <text fg={theme.textMuted}>
-          */5=每5分钟  */30=每30分  0 *=每小时
-          {"\n"}0 9=每天9点  0,30=每时0/30分
-        </text>
-      ),
-    })
+    const expr = await DialogPrompt.show(dialog, "Cron (*/5=5分 0 *=1时 0 9=天9点)", { value: "*/5" })
     if (!expr) return
     const list = kv.get("scheduled_tasks", [] as CronTask[])
     list.push({
@@ -235,6 +227,8 @@ export function Sidebar(props: { sessionID: string; overlay?: boolean }) {
             agent: agent?.name ?? "build",
             model: { provider: local.model.parsed().provider, model: local.model.parsed().model },
             parts: [{ type: "text", text: t.prompt }],
+          }).then(() => {
+            toast.show({ title: `Scheduled: ${t.name}`, message: t.prompt.slice(0, 60), variant: "info" })
           }).catch(() => {})
           t.lastRun = now
           t.nextRun = cronNext(t.cron, now + 60000)
