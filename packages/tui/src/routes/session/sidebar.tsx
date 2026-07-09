@@ -188,7 +188,15 @@ export function Sidebar(props: { sessionID: string; overlay?: boolean }) {
     if (!name) return
     const prompt = await DialogPrompt.show(dialog, "Prompt", { value: "" })
     if (!prompt) return
-    const expr = await DialogPrompt.show(dialog, "Cron (e.g. */5, 0 9 * * *)", { value: "*/5" })
+    const expr = await DialogPrompt.show(dialog, "Cron expression", {
+      value: "*/5",
+      description: () => (
+        <text fg={theme.textMuted}>
+          */5=每5分钟  */30=每30分  0 *=每小时
+          {"\n"}0 9=每天9点  0,30=每时0/30分
+        </text>
+      ),
+    })
     if (!expr) return
     const list = kv.get("scheduled_tasks", [] as CronTask[])
     list.push({
@@ -466,6 +474,12 @@ export function Sidebar(props: { sessionID: string; overlay?: boolean }) {
                   <text fg={theme.primary}><b>Scheduled</b></text>
                   <text fg={theme.secondary} onMouseUp={handleAddTask}>+</text>
                 </box>
+                <text fg={theme.textMuted}>
+                  */5=5分  */30=30分  0 *=1时  0 9=天9点  0,30=每时0/30分
+                </text>
+                <Show when={tasks().length === 0}>
+                  <text fg={theme.textMuted} paddingLeft={1}>点 + 添加定时任务</text>
+                </Show>
                 <For each={tasks()}>
                   {(t) => (
                     <box flexDirection="row" alignItems="center" gap={1} paddingLeft={1}>
