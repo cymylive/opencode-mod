@@ -19,6 +19,50 @@ import { getScrollAcceleration } from "../../util/scroll"
 import { WorkspaceLabel } from "../../component/workspace-label"
 import { entries, map, pipe, sortBy } from "remeda"
 
+// ── Scheduled Tasks ──
+interface CronTask {
+  id: string
+  name: string
+  prompt: string
+  cron: string
+  enabled: boolean
+  lastRun?: number
+  nextRun?: number
+  createdAt: number
+}
+
+function fieldMatches(value: number, field: string): boolean {
+  const f = field.trim()
+  if (f === "*") return true
+  if (f.startsWith("*/")) {
+    const step = parseInt(f.slice(2), 10)
+    return !isNaN(step) && step > 0 && value % step === 0
+  }
+  if (f.includes("-")) {
+    const [lo, hi] = f.split("-").map(Number)
+    return value >= lo && value <= hi
+  }
+  for (const v of f.split(",")) {
+    if (parseInt(v, 10) === value) return true
+  }
+  return false
+}
+
+function cronNext(cron: string, from: number): number {
+  const parts = cron.trim().split(/\s+/)
+  const minuteField = parts[0]
+  const hourField = parts.length === 1 ? "*" : parts[1]
+  const d = new Date(from)
+  d.setSeconds(0, 0)
+  for (let i = 0; i < 1440; i++) {
+    if (fieldMatches(d.getMinutes(), minuteField) && fieldMatches(d.getHours(), hourField)) {
+      return d.getTime()
+    }
+    d.setTime(d.getTime() + 60000)
+  }
+  return 0
+}
+
 export function Sidebar(props: { sessionID: string; overlay?: boolean }) {
   const pluginRuntime = usePluginRuntime()
   const project = useProject()
@@ -133,6 +177,66 @@ export function Sidebar(props: { sessionID: string; overlay?: boolean }) {
     notes[name] = note || ""
     kv.set("sidebar_skill_notes", notes)
   }
+
+  // ── Tasks ──
+  const [tasks, setTasks] = createSignal<CronTask[]>([])
+  createEffect(() => { setTasks(kv.get("scheduled_tasks", [] as CronTask[])) })
+  const saveTasks = (list: CronTask[]) => kv.set("scheduled_tasks", list)
+
+  const handleAddTask = async () => {
+    const name = await DialogPrompt.show(dialog, "Task name", { value: "" })
+    if (!name) return
+    const prompt = await DialogPrompt.show(dialog, "Prompt", { value: "" })
+    if (!prompt) return
+    const expr = await DialogPrompt.show(dialog, "Cron (e.g. */5, 0 9 * * *)", { value: "*/5" })
+    if (!expr) return
+    const list = kv.get("scheduled_tasks", [] as CronTask[])
+    list.push({
+      id: Math.random().toString(36).slice(2, 10),
+      name, prompt, cron: expr, enabled: true,
+      createdAt: Date.now(),
+      nextRun: cronNext(expr, Date.now()),
+    })
+    saveTasks(list)
+    setTasks([...list])
+  }
+
+  const handleToggleTask = (id: string) => {
+    const list = kv.get("scheduled_tasks", [] as CronTask[])
+    const t = list.find((x) => x.id === id)
+    if (t) { t.enabled = !t.enabled; saveTasks(list); setTasks([...list]) }
+  }
+
+  const handleDeleteTask = (id: string) => {
+    const list = kv.get("scheduled_tasks", [] as CronTask[]).filter((x) => x.id !== id)
+    saveTasks(list)
+    setTasks([...list])
+  }
+
+  createEffect(() => {
+    const interval = setInterval(async () => {
+      const list = kv.get("scheduled_tasks", [] as CronTask[])
+      const now = Date.now()
+      let changed = false
+      for (const t of list) {
+        if (!t.enabled) continue
+        if (t.nextRun && t.nextRun <= now) {
+          const agent = local.agent.current()
+          sdk.client.session.prompt({
+            sessionID: props.sessionID,
+            agent: agent?.name ?? "build",
+            model: { provider: local.model.parsed().provider, model: local.model.parsed().model },
+            parts: [{ type: "text", text: t.prompt }],
+          }).catch(() => {})
+          t.lastRun = now
+          t.nextRun = cronNext(t.cron, now + 60000)
+          changed = true
+        }
+      }
+      if (changed) { saveTasks(list); setTasks([...list]) }
+    }, 10000)
+    onCleanup(() => clearInterval(interval))
+  })
 
   const mcpStatusColor = (status: string) => {
     if (status === "connected") return theme.success
@@ -356,6 +460,32 @@ export function Sidebar(props: { sessionID: string; overlay?: boolean }) {
                   </For>
                 </box>
               </Show>
+
+              <box paddingTop={2} gap={1}>
+                <box flexDirection="row" justifyContent="space-between" border={["bottom"]} borderColor={theme.border}>
+                  <text fg={theme.primary}><b>Scheduled</b></text>
+                  <text fg={theme.secondary} onMouseUp={handleAddTask}>+</text>
+                </box>
+                <For each={tasks()}>
+                  {(t) => (
+                    <box flexDirection="row" alignItems="center" gap={1} paddingLeft={1}>
+                      <text fg={t.enabled ? theme.success : theme.textMuted}>●</text>
+                      <box flexGrow={1}>
+                        <text fg={theme.text} wrapMode="ellipsis" width={24}>{t.name}</text>
+                        <text fg={theme.textMuted} wrapMode="ellipsis" width={28}>
+                          {t.nextRun ? Locale.todayTimeOrDateTime(t.nextRun) : "-"}
+                        </text>
+                      </box>
+                      <box paddingX={1} onMouseUp={() => handleToggleTask(t.id)}>
+                        <text fg={t.enabled ? theme.success : theme.textMuted}>{t.enabled ? "ON" : "OFF"}</text>
+                      </box>
+                      <box paddingX={1} onMouseUp={() => handleDeleteTask(t.id)}>
+                        <text fg={theme.textMuted}>✕</text>
+                      </box>
+                    </box>
+                  )}
+                </For>
+              </box>
             </pluginRuntime.Slot>
           </box>
         </scrollbox>
