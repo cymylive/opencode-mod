@@ -18,6 +18,7 @@ import { Locale } from "../../util/locale"
 import { getScrollAcceleration } from "../../util/scroll"
 import { WorkspaceLabel } from "../../component/workspace-label"
 import { entries, map, pipe, sortBy } from "remeda"
+import { isDefaultTitle } from "../../util/session"
 
 // ── Scheduled Tasks ──
 interface CronTask {
@@ -48,7 +49,7 @@ function fieldMatches(value: number, field: string): boolean {
   return false
 }
 
-function cronNext(cron: string, from: number): number {
+function cronNext(cron: string, from: number): number | undefined {
   const parts = cron.trim().split(/\s+/)
   const minuteField = parts[0]
   const hourField = parts.length === 1 ? "*" : parts[1]
@@ -60,7 +61,7 @@ function cronNext(cron: string, from: number): number {
     }
     d.setTime(d.getTime() + 60000)
   }
-  return 0
+  return undefined
 }
 
 export function Sidebar(props: { sessionID: string; overlay?: boolean }) {
@@ -116,6 +117,47 @@ export function Sidebar(props: { sessionID: string; overlay?: boolean }) {
       .toSorted((a, b) => (b.time.updated ?? 0) - (a.time.updated ?? 0))
       .slice(0, 20)
   })
+
+  const [extractedTitles, setExtractedTitles] = createSignal<Record<string, string>>({})
+  const displayTitle = (s: { id: string; title: string; time: { updated: number } }) => {
+    if (!isDefaultTitle(s.title)) return s.title
+    const cached = extractedTitles()[s.id]
+    if (cached) return cached
+    const msgs = sync.data.message[s.id] ?? []
+    const firstUser = msgs.find((m: any) => m.role === "user")
+    if (firstUser) {
+      const parts = (sync.data as any).part?.[firstUser.id] ?? []
+      const text = parts
+        .filter((p: any) => p.type === "text" && !p.synthetic)
+        .map((p: any) => p.text)
+        .join("")
+        .trim()
+      if (text) {
+        const extracted = text.length > 40 ? text.slice(0, 37) + "..." : text
+        setExtractedTitles((prev) => ({ ...prev, [s.id]: extracted }))
+        return extracted
+      }
+    }
+    if (msgs.length === 0) {
+      sync.session.sync(s.id).then(() => {
+        const msgs2 = sync.data.message[s.id] ?? []
+        const firstUser2 = msgs2.find((m: any) => m.role === "user")
+        if (firstUser2) {
+          const parts = (sync.data as any).part?.[firstUser2.id] ?? []
+          const text = parts
+            .filter((p: any) => p.type === "text" && !p.synthetic)
+            .map((p: any) => p.text)
+            .join("")
+            .trim()
+          if (text) {
+            const extracted = text.length > 40 ? text.slice(0, 37) + "..." : text
+            setExtractedTitles((prev) => ({ ...prev, [s.id]: extracted }))
+          }
+        }
+      })
+    }
+    return `New ${new Date(s.time.updated).toLocaleString("zh-CN", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" })}`
+  }
 
   const isCurrent = (id: string) => id === props.sessionID
 
@@ -190,27 +232,29 @@ export function Sidebar(props: { sessionID: string; overlay?: boolean }) {
     if (!prompt) return
     const expr = await DialogPrompt.show(dialog, "Cron (*/5=5分 0 *=1时 0 9=天9点)", { value: "*/5" })
     if (!expr) return
-    const list = kv.get("scheduled_tasks", [] as CronTask[])
-    list.push({
+    const newTask: CronTask = {
       id: Math.random().toString(36).slice(2, 10),
       name, prompt, cron: expr, enabled: true,
       createdAt: Date.now(),
       nextRun: cronNext(expr, Date.now()),
-    })
+    }
+    const list = [...tasks(), newTask]
     saveTasks(list)
-    setTasks([...list])
+    setTasks(list)
+    dialog.clear()
+    toast.show({ title: `Task added`, message: name, variant: "info" })
   }
 
   const handleToggleTask = (id: string) => {
-    const list = kv.get("scheduled_tasks", [] as CronTask[])
-    const t = list.find((x) => x.id === id)
-    if (t) { t.enabled = !t.enabled; saveTasks(list); setTasks([...list]) }
+    const list = tasks().map((t) => t.id === id ? { ...t, enabled: !t.enabled } : t)
+    saveTasks(list)
+    setTasks(list)
   }
 
   const handleDeleteTask = (id: string) => {
-    const list = kv.get("scheduled_tasks", [] as CronTask[]).filter((x) => x.id !== id)
+    const list = tasks().filter((t) => t.id !== id)
     saveTasks(list)
-    setTasks([...list])
+    setTasks(list)
   }
 
   createEffect(() => {
@@ -229,7 +273,9 @@ export function Sidebar(props: { sessionID: string; overlay?: boolean }) {
             parts: [{ type: "text", text: t.prompt }],
           }).then(() => {
             toast.show({ title: `Scheduled: ${t.name}`, message: t.prompt.slice(0, 60), variant: "info" })
-          }).catch(() => {})
+          }).catch((e) => {
+            toast.show({ title: `Scheduled failed: ${t.name}`, message: String(e), variant: "error" })
+          })
           t.lastRun = now
           t.nextRun = cronNext(t.cron, now + 60000)
           changed = true
@@ -349,7 +395,7 @@ export function Sidebar(props: { sessionID: string; overlay?: boolean }) {
                               onMouseUp={() => !isCurrent(s.id) && route.navigate({ type: "session", sessionID: s.id })}
                             >
                               <text fg={isCurrent(s.id) ? theme.primary : theme.text} wrapMode="ellipsis" width={26}>
-                                {s.title}
+                                {displayTitle(s)}
                               </text>
                               <text fg={theme.textMuted}>
                                 {Locale.todayTimeOrDateTime(s.time.updated)}

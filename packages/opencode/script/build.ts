@@ -197,6 +197,7 @@ for (const item of targets) {
       OPENCODE_CHANNEL: `'${Script.channel}'`,
       OPENCODE_LIBC: item.os === "linux" ? `'${item.abi ?? "glibc"}'` : "",
       ...(item.os === "linux" ? { "process.env.OPENTUI_LIBC": JSON.stringify(item.abi ?? "glibc") } : {}),
+      "process.env.OPENCODE_DISABLE_AUTOUPDATE": JSON.stringify("true"),
     },
   })
 
