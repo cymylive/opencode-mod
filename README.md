@@ -118,6 +118,14 @@ bun run dev
 
 ---
 
+## 🙏 感谢
+
+本项目是基于 [OpenCode](https://github.com/anomalyco/opencode) v1.18.3 的二次修改版本，并非 OpenCode 官方团队开发，也不存在任何隶属关系。
+
+感谢 OpenCode 团队（[@anomalyco](https://github.com/anomalyco)）的开源贡献，他们打造了出色的 AI Coding Agent 工具，使得本项目的魔改成为可能。
+
+> 如果你在使用 "opencode" 作为项目名的一部分，请在 README 中注明该项目不是 OpenCode 团队官方开发，且不存在隶属关系。
+
 ## 📝 License
 
-基于 [MIT](LICENSE) 协议开源。修改自 [OpenCode](https://github.com/anomalyco/opencode)。
+基于 [MIT](LICENSE) 协议开源。
